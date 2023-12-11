@@ -1,0 +1,4 @@
+Dockerfile
+.env.test
+.env.prod
+.txt
