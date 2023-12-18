@@ -31,7 +31,7 @@ def logging_bool_converter(input):
         return 'Со входом'
     elif input == False:
         return 'Без входа'
-    
+
 
 def product_post(item):
     product_insertion = products.insert().values(
@@ -48,16 +48,28 @@ def product_post(item):
     conn.execute(product_insertion)
     conn.commit()
 
-# dblist = database_autofill()
-# for item in dblist:
-#     product_post(item)
+
+# def db_autofill(num):
+#     names = ['Xbox', 'Discord', 'Netflix', 'PlayStation', 'Steam']
+#     durations = [None, 1, 3, 6, 12]
+    
+#     for x in range(num):
+#         item = {
+#                 'name':randint(1,99999),
+#                 'description': f'description{x}',
+#                 'duration': durations[randint(0, len(durations)-1)],
+#                 'with_logging':randint(0,1),
+#                 'message_after_payment':f'message_after_payment{x}',
+#                 'price': randint (100, 400),
+#                 }
+        
+#         product_post(item)
+
+# db_autofill(45)
 
 def get_selected_product(name, duration, with_logging):
-    
     select_query = db.select(products).where(products.c.name == name, products.c.duration == duration, products.c.with_logging == with_logging)
-    
     rows = conn.execute(select_query).fetchall()
-    
     return rows[0]
     
   
@@ -126,9 +138,7 @@ def product_delete(id):
 
 def product_presentation():
     select_query = db.select(products)
-
     names = {}
-    
     rows = conn.execute(select_query).fetchall()
     
     for row in rows:

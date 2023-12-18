@@ -9,24 +9,26 @@ from random import randint
 import os
 from dotenv import load_dotenv
 from payment_processing import create_a_bill, if_payment_is_done
+import re
 
-load_dotenv('data/.env.prod')
-env_prefix = 'prod_'
+# load_dotenv('data/.env.prod')
+# env_prefix = 'prod_'
 
 # load_dotenv('data/.env.test')
 # env_prefix='test_'
 
 # env_prefix = ''
 
+page_num = {}
 in_order_status = {}
 ticket = {}
-view = {}
+name_button_views = {}
 user_data = {}
 counter = {}
 admin_id = [519148522373644299, 439398320327098390]
 
 desc = 'Тестовый бот-магазин'
-ord_cat_counter = 3
+ord_cat_counter = 4
 
 intents = discord.Intents.default()
 intents.members = True
@@ -576,17 +578,12 @@ async def order_info_gathering(ctx, channel, products_dict):
         in_order_status[ctx_author] = 0
         
         await interaction.response.defer()
-        
         channel_object = bot.get_channel(channel)  
-        
         await channel_object.delete()
-        
         ctx.channel.id = orders_channel
-        
         await ctx.send (f'<@{ctx.author.id}> заказ отменён!')
     
     cancel_button.callback = lambda b: cancel_button_callback(b, ctx_author, ctx=ctx, channel=channel)
-    
     ctx.channel.id = channel
     
     def interaction_check(interaction):
@@ -892,13 +889,10 @@ f"""
 async def order_info_gathering_init(ctx, new_channel_id):
     ctx.channel.id = new_channel_id
     channel = ctx.channel.id
-    
     ticket[channel] = {}
-    view = View()
-    
     products_dict, names_list = product_presentation()
     
-    async def name_buttons_creation(item):
+    async def name_buttons_creation(item, view):
         
         button = Button(label=item, style=discord.ButtonStyle.blurple, custom_id=f'ticket_name_{item}_{channel}')
         
@@ -907,36 +901,145 @@ async def order_info_gathering_init(ctx, new_channel_id):
             ticket[channel] = {'name': item}
 
             await interaction.message.edit(content=f'Вы выбрали товар {item}', view=View())
+            
+            ctx.channel.id = channel
+            async for message in ctx.channel.history(limit=100):
+                match = re.search(r'Страница (\d+)', message.content)
+                content_st = 'Навигация по страницам:'
+                content_nd = 'Отменить заказ:'
+                
+                if content_st.lower() in message.content.lower() or content_nd.lower() in message.content.lower():
+                    await message.delete()
+                    print('Сообщение удалено')
+                    
+                if match:
+                    await message.delete()
+                    
+            
             await order_info_gathering(ctx, channel, products_dict)
 
         button.callback = lambda b: button_callback(b, item=item, products_dict=products_dict, ctx=ctx)
         view.add_item(button)
         
-    for item in names_list:
-        await name_buttons_creation(item)
-        
     async def cancel_button_callback(interaction, ctx):
         await interaction.response.defer()
         in_order_status[ctx.author.id] = 0
-        
         channel_object = bot.get_channel(new_channel_id)  
-        
         await channel_object.delete()
-        
         ctx.channel.id = orders_channel
-        
         await ctx.send(f'<@{ctx.author.id}> заказ отменён!')
     
     cancel_button = Button(label='Отменить заказ', style=discord.ButtonStyle.gray, custom_id=f'delete_ticket_from_name{ctx.channel.id}')
-    
     cancel_button.callback = lambda b: cancel_button_callback(b, ctx)
     
-    view.add_item(cancel_button)
+    name_button_views[channel] = []
+    print(names_list)
+    
+    view = View()
+    counter = 0
+    for item in names_list:
+        await name_buttons_creation(item=item, view=view)
+        counter+=1
         
-    await ctx.send('Выберите название продукта: ', view=view)
+        if counter == 19 or names_list.index(item) == len(names_list)-1:
+            name_button_views[channel].append(view)
+            counter = 0
+            view = View()
+    
+    cancel_view = View()
+    cancel_view.add_item(cancel_button)
+    
+    async def update_message(channel, message_id, new_page_num):
+        channel_obj = bot.get_channel(channel)
+        message = await channel_obj.fetch_message(message_id)
+        new_view = name_button_views[channel][new_page_num]
+        await message.edit(view=new_view)
+        
+    async def prev_page_button_callback(interaction, ctx, channel):
+        await interaction.response.defer()
+        if page_num[channel] == 0:
+            return
+
+        page_num[channel]-=1      
+        content = 'Выберите товар:'
+        ctx.channel.id = channel
+        async for message in ctx.channel.history(limit=50):
+            match = re.search(r'Страница (\d+)', message.content)
+            if match:
+                await message.edit(content=f'Страница {page_num[channel]+1}')
+            if content.lower() in message.content.lower():
+                await update_message(channel, message.id, page_num[channel])
+
+        def interaction_check(interaction):
+            return interaction.channel_id == channel
+        
+        try:
+            interaction = await bot.wait_for('interaction', check=interaction_check, timeout=90)
+        
+        except asyncio.TimeoutError:
+            await idle_ticket_closure(channel, ctx.author.id)
+            ctx.channel.id = orders_channel
+            await ctx.send(f'<@{ctx.author.id}>, канал удалён из-за бездействия')
+        
+        
+    async def next_page_button_callback(interaction, ctx, channel):
+        await interaction.response.defer()
+        if page_num[channel] == len(name_button_views[channel])-1:
+            return
+        
+        page_num[channel]+=1
+        content = 'Выберите товар:'
+        ctx.channel.id = channel
+        async for message in ctx.channel.history(limit=50):
+            match = re.search(r'Страница (\d+)', message.content)
+            if match:
+                await message.edit(content=f'Страница {page_num[channel]+1}')
+            if content.lower() in message.content.lower():
+                await update_message(channel, message.id, page_num[channel])
+                
+        def interaction_check(interaction):
+            return interaction.channel_id == new_channel_id
+        
+        try:
+            interaction = await bot.wait_for('interaction', check=interaction_check, timeout=90)
+        
+        except asyncio.TimeoutError:
+            await idle_ticket_closure(channel, ctx.author.id)
+            ctx.channel.id = orders_channel
+            await ctx.send(f'<@{ctx.author.id}>, канал удалён из-за бездействия')
+                
+    prev_page_button = Button(
+        label='Предыдущая страница',
+        style=discord.ButtonStyle.blurple,
+        custom_id=f'prev_page_{ctx.channel.id}_{randint(1, 100000000000)}'
+    )
+
+    next_page_button = Button(
+        label='Следующая страница',
+        style=discord.ButtonStyle.blurple,
+        custom_id=f'next_page_{ctx.channel.id}_{randint(1, 100000000000)}'
+    )
+    page_num[channel] = 0
+    
+    ctx.channel_id = channel
+    message = await ctx.send(f'Страница {page_num[channel]+1}')
+    
+    prev_page_button.callback = lambda b: prev_page_button_callback(b, ctx, channel=channel)
+    next_page_button.callback = lambda b: next_page_button_callback(b, ctx, channel=channel)
+    
+    page_view = View()
+    page_view.add_item(prev_page_button)
+    page_view.add_item(next_page_button)
+
+    ctx.channel.id = channel
+    await ctx.send('Навигация по страницам:', view=page_view)
+    ctx.channel.id = channel
+    products = await ctx.send('Выберите товар:', view=name_button_views[channel][page_num[channel]])
+    ctx.channel.id = channel
+    products = await ctx.send('Отменить заказ:', view=cancel_view)
     
     def interaction_check(interaction):
-        return interaction.channel_id == ctx.channel.id
+        return interaction.channel_id == channel
     
     try:
         interaction = await bot.wait_for('interaction', check=interaction_check, timeout=90)
